@@ -61,3 +61,5 @@ def enroute():
 
         # Send message to the next node
 
+if __name__ == '__main__':
+    socketio.run(app)
