@@ -1,0 +1,20 @@
+<html>
+<head>
+<script type="text/javascript" src="./socket.io.js"></script>
+<script type="text/javascript" charset="utf-8">
+    var socket = io.connect('http://127.0.0.1:5000', {log: false, origins: '*:*'});
+    socket.on('connect', function() {
+      socket.emit('establish-dh', {p: 4, g: 23, s: 3});
+    });
+</script>
+<title>Page Title</title>
+</head>
+<body>
+
+<h1>My First Heading</h1>
+<p>My first paragraph.</p>
+
+</body>
+</html>
+
+
