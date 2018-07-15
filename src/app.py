@@ -8,6 +8,8 @@ from random import randint
 
 import base64
 import uuid
+from urllib.request import urlopen
+
 from flask_socketio import SocketIO, emit, send
 from socketIO_client import SocketIO as cli
 from socketIO_client import LoggingNamespace
@@ -23,7 +25,7 @@ received_keys = [] # It will contain the key as a intermedium storage between
                     # the callback from the node 3 and 1, since no direct communication
                     # is possible.
                     # TODO: Change websocket library to avoid this problem.
-
+messages = []
 
 def validateToken(token):
     '''This method is used to validate the token that is in the headers.
@@ -54,6 +56,21 @@ def on_connect_node(*args):
         elif(jump==3):
             received_keys.append(args)
             emit('response'+str(jump), args[0])
+
+
+def return_message(*args):
+    '''Returns the message from the second second node to the parent
+    '''
+    if args:
+        messages.append(args)
+
+def emit_message(*args):
+    '''Returns the message to the client
+    '''
+    if args:
+        emit('content', args[0])
+
+
 
 @socketio.on('connect')
 def connection():
@@ -137,6 +154,7 @@ def generate_key_and_decrypt(uuid, message):
         cipher = AES.new(key, AES.MODE_CFB, iv)
         return cipher.decrypt(message)
 
+
 @socketio.on('decrypt_and_send')
 def decript_and_send(data):
     '''This method decrypt the message and send it to the next node.
@@ -153,7 +171,7 @@ def decript_and_send(data):
         data['message'] = decrypted_message
         with cli(host, port, LoggingNamespace) as my_client:
             my_client.on('connect', on_connect)
-            my_client.emit('decrypt_and_send', data)
+            my_client.emit('decrypt_and_send', data, emit_message)
             my_client.wait(seconds=3)
     elif (jump==2):
         data['jump'] += 1
@@ -164,8 +182,12 @@ def decript_and_send(data):
         data['message'] = decrypted_message
         with cli(host, port, LoggingNamespace) as my_client:
             my_client.on('connect', on_connect)
-            my_client.emit('decrypt_and_send', data)
-            my_client.wait(seconds=1)
+            my_client.emit('decrypt_and_send', data, return_message)
+            my_client.wait(seconds=3)
+            content = messages.pop()
+            content[0]['jump'] = jump+1
+            print('sending...content', content)
+            return content
     elif (jump==3):
         # end of the way
         uuid = data.get('uuid3')
@@ -173,6 +195,9 @@ def decript_and_send(data):
         port = data['third_port']
         decrypted_message = generate_key_and_decrypt(uuid, message)
         print ('Message decrypted: ', decrypted_message)
+        html = urlopen(decrypted_message)
+        return dict(content=html.read())
+
 
 @app.route("/enroute", methods={'POST'})
 def enroute():
