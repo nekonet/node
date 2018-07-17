@@ -5,10 +5,12 @@ from Crypto.Cipher import AES
 from Crypto import Random
 from datetime import datetime
 from random import randint
+from datetime import datetime
 
 import base64
 import uuid
 from urllib.request import urlopen
+import urllib
 
 from flask_socketio import SocketIO, emit, send
 from socketIO_client import SocketIO as cli
@@ -17,25 +19,37 @@ from socketIO_client import LoggingNamespace
 
 app = Flask(__name__)
 
-socketio = SocketIO(app)
-salt_key = '111111111111111'
-
 keys_list = {} # It will keep the pair uuid : shared_secret
 received_keys = [] # It will contain the key as a intermedium storage between
                     # the callback from the node 3 and 1, since no direct communication
                     # is possible.
                     # TODO: Change websocket library to avoid this problem.
 messages = []
+core_init = {}
+
+def init_app(app):
+    print("hello")
+    data = urllib.parse.urlencode('').encode("utf-8")
+    core_init = urlopen('http://138.68.75.213:5000/node', data=data)
+    #import pdb; pdb.set_trace()
+    #node = urlopen('http://138.68.75.213:5000/token_validation_key')
+
+socketio = SocketIO(app)
+salt_key = '111111111111111'
+
+
 
 def validateToken(token):
     '''This method is used to validate the token that is in the headers.
     '''
+
+    raw = base64.b64decode(token)
     with open('private.pem','r') as priv_pem:
         priv_key = RSA.importKey(priv_pem.read())
-        decripted_token = priv_key.decrypt(token)
-        date_token = datetime.strptime(decripted_token,'%m/%d/%Y')
+        decripted_token = priv_key.decrypt(raw)
+        tx_time = datetime.fromtimestamp(int(decripted_token.decode('utf-8')))
         current_date = datetime.now()
-        if(decripted_token < current_date):
+        if(tx_time > current_date):
             return False
         else:
             return True
@@ -102,46 +116,52 @@ def establish_diffie_hellman(data):
     '''This method is used to create the key exchange with the client recursively
         Using websockets, generating shared secrets with each node (3).
     '''
-    # Receive two shared primes
-    # Generate random private secret
-    jump = data.get('jump')
-    response = 'response '
-    if (jump==1):
-        p = data.get('p')
-        g = data.get('g')
-        client_shared_secret = data['s1']
-        host = data['second_host']
-        port = data['second_port']
-        data['jump'] += 1
-        node_private_secret = randint(0,100)
-        # send A = g^a mod p
-        node_shared_node = (g**node_private_secret) % p
-        identifier = str(uuid.uuid4())
-        print ('generating key 1')
-        emit('response'+str(jump), dict(shared_node=node_shared_node, uuid=identifier, jump=jump))
-        # Shared secret
-        shared_secret = (client_shared_secret ** node_private_secret) % p
-        key = salt_key + str(shared_secret)
-        keys_list[identifier]=key
+    token = data.get('authorization')
+    print('sending token', token)
+    if token:
+        valid = validateToken(token)
+        print ('is valid? ', valid)
+        if valid:
+            # Receive two shared primes
+            # Generate random private secret
+            jump = data.get('jump')
+            response = 'response '
+            if (jump==1):
+                p = data.get('p')
+                g = data.get('g')
+                client_shared_secret = data['s1']
+                host = data['second_host']
+                port = data['second_port']
+                data['jump'] += 1
+                node_private_secret = randint(0,100)
+                # send A = g^a mod p
+                node_shared_node = (g**node_private_secret) % p
+                identifier = str(uuid.uuid4())
+                print ('generating key 1')
+                emit('response'+str(jump), dict(shared_node=node_shared_node, uuid=identifier, jump=jump))
+                # Shared secret
+                shared_secret = (client_shared_secret ** node_private_secret) % p
+                key = salt_key + str(shared_secret)
+                keys_list[identifier]=key
 
-        print(shared_secret)
-        with cli(host, port, LoggingNamespace) as my_client:
-            my_client.on('connect', on_connect)
-            my_client.emit('create_key', data, on_connect_node)
-            my_client.emit('create_conection', data, on_connect_node)
-            my_client.wait(seconds=3)
-    elif(jump==2):
-        data['jump'] += 1
-        host = data['third_host']
-        port = data['third_port']
-        with cli(host, port, LoggingNamespace) as my_client:
-            my_client.on('connect', on_connect)
-            my_client.emit('create_key', data, on_connect_node)
-            my_client.wait(seconds=1)
-            next_key = received_keys.pop()
-            next_key[0]['jump'] = jump+1
-            print('sending...key', next_key)
-            return next_key
+                print(shared_secret)
+                with cli(host, port, LoggingNamespace) as my_client:
+                    my_client.on('connect', on_connect)
+                    my_client.emit('create_key', data, on_connect_node)
+                    my_client.emit('create_conection', data, on_connect_node)
+                    my_client.wait(seconds=3)
+            elif(jump==2):
+                data['jump'] += 1
+                host = data['third_host']
+                port = data['third_port']
+                with cli(host, port, LoggingNamespace) as my_client:
+                    my_client.on('connect', on_connect)
+                    my_client.emit('create_key', data, on_connect_node)
+                    my_client.wait(seconds=1)
+                    next_key = received_keys.pop()
+                    next_key[0]['jump'] = jump+1
+                    print('sending...key', next_key)
+                    return next_key
 
 
 def generate_key_and_decrypt(uuid, message):
@@ -160,6 +180,12 @@ def decript_and_send(data):
     '''This method decrypt the message and send it to the next node.
         It is recursively called
     '''
+    import pdb; pdb.set_trace()
+    token = data.get('authorization')
+    print('token... ', token)
+    valid = validateToken(token)
+    if not valid:
+        return
     jump = data.get('jump')
     message = data.get('message')
     if (jump==1):
@@ -201,8 +227,7 @@ def decript_and_send(data):
 
 @app.route("/enroute", methods={'POST'})
 def enroute():
-    token = request.headers.get('authorization', None)
-    valid = validateToken(token)
+
     if valid:
         pass
         # allow comunication
@@ -211,4 +236,5 @@ def enroute():
         # return 404
 
 if __name__ == '__main__':
+    init_app(app)
     socketio.run(app, port=5000)
