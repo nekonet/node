@@ -11,6 +11,8 @@ import base64
 import uuid
 from urllib.request import urlopen
 import urllib
+import binascii
+
 
 from flask_socketio import SocketIO, emit, send
 from socketIO_client import SocketIO as cli
@@ -28,7 +30,7 @@ messages = []
 core_init = {}
 
 def init_app(app):
-    print("hello")
+    print("Wake up Neo...")
     data = urllib.parse.urlencode('').encode("utf-8")
     core_init = urlopen('http://138.68.75.213:5000/node', data=data)
     #import pdb; pdb.set_trace()
@@ -36,6 +38,10 @@ def init_app(app):
 
 socketio = SocketIO(app)
 salt_key = '111111111111111'
+IV = 'This is an IV456'
+MODE = AES.MODE_CFB
+BLOCK_SIZE = 16
+SEGMENT_SIZE = 128
 
 
 
@@ -106,7 +112,9 @@ def retreive_key(data):
     elif (jump==3):
         client_shared_secret = data['s3']
     shared_secret = (client_shared_secret ** node_private_secret) % p
+    print ('Creating key for jump: ', jump)
     key = salt_key + str(shared_secret)
+
     identifier = str(uuid.uuid4())
     keys_list[identifier]=key
     return dict(shared_node=node_shared_node, uuid=identifier, jump=jump)
@@ -117,10 +125,9 @@ def establish_diffie_hellman(data):
         Using websockets, generating shared secrets with each node (3).
     '''
     token = data.get('authorization')
-    print('sending token', token)
+    print('Validating token before the connection (It will be verified also during communication)...')
     if token:
         valid = validateToken(token)
-        print ('is valid? ', valid)
         if valid:
             # Receive two shared primes
             # Generate random private secret
@@ -137,7 +144,7 @@ def establish_diffie_hellman(data):
                 # send A = g^a mod p
                 node_shared_node = (g**node_private_secret) % p
                 identifier = str(uuid.uuid4())
-                print ('generating key 1')
+                print ('Generating key for node', jump)
                 emit('response'+str(jump), dict(shared_node=node_shared_node, uuid=identifier, jump=jump))
                 # Shared secret
                 shared_secret = (client_shared_secret ** node_private_secret) % p
@@ -164,15 +171,22 @@ def establish_diffie_hellman(data):
                     return next_key
 
 
-def generate_key_and_decrypt(uuid, message):
+def _unpad_string(value):
+    while value[-1] == '\x00':
+        value = value[:-1]
+    return value
+
+
+def generate_key_and_decrypt(uuid, message, iv):
     '''Search into the uuid dict of the node, once it has the shared_secret
         From DH. It creates the key and decrypt it.
     '''
     key = keys_list.get(uuid, None)
     if key:
-        iv = Random.new().read(AES.block_size)
-        cipher = AES.new(key, AES.MODE_CFB, iv)
-        return cipher.decrypt(message)
+        aes = AES.new(key, MODE, iv, segment_size=SEGMENT_SIZE)
+        encrypted_text_bytes = binascii.a2b_hex(message)
+        decrypted_text = aes.decrypt(encrypted_text_bytes)
+        return decrypted_text.decode()
 
 
 @socketio.on('decrypt_and_send')
@@ -180,9 +194,7 @@ def decript_and_send(data):
     '''This method decrypt the message and send it to the next node.
         It is recursively called
     '''
-    import pdb; pdb.set_trace()
     token = data.get('authorization')
-    print('token... ', token)
     valid = validateToken(token)
     if not valid:
         return
@@ -193,7 +205,7 @@ def decript_and_send(data):
         uuid = data.get('uuid1')
         host = data['second_host']
         port = data['second_port']
-        decrypted_message = generate_key_and_decrypt(uuid, message)
+        decrypted_message = generate_key_and_decrypt(uuid, message, IV)
         data['message'] = decrypted_message
         with cli(host, port, LoggingNamespace) as my_client:
             my_client.on('connect', on_connect)
@@ -204,25 +216,31 @@ def decript_and_send(data):
         uuid = data.get('uuid2')
         host = data['third_host']
         port = data['third_port']
-        decrypted_message = generate_key_and_decrypt(uuid, message)
+        decrypted_message = generate_key_and_decrypt(uuid, message, IV)
         data['message'] = decrypted_message
         with cli(host, port, LoggingNamespace) as my_client:
             my_client.on('connect', on_connect)
             my_client.emit('decrypt_and_send', data, return_message)
-            my_client.wait(seconds=3)
-            content = messages.pop()
-            content[0]['jump'] = jump+1
+            my_client.wait(seconds=5)
+            content = messages.pop()[0]
             print('sending...content', content)
             return content
     elif (jump==3):
-        # end of the way
         uuid = data.get('uuid3')
         host = data['third_host']
         port = data['third_port']
-        decrypted_message = generate_key_and_decrypt(uuid, message)
-        print ('Message decrypted: ', decrypted_message)
-        html = urlopen(decrypted_message)
-        return dict(content=html.read())
+        key = keys_list.get(uuid, None)
+        if key:
+            aes = AES.new(key, MODE, IV, segment_size=SEGMENT_SIZE)
+            encrypted_text_bytes = binascii.a2b_hex(message)
+            decrypted_text = aes.decrypt(encrypted_text_bytes)
+            decrypted_message = _unpad_string(decrypted_text.decode())
+            #aux = binascii.b2a_hex(decrypted_text).rstrip()
+            print ('Message decrypted: ', decrypted_message)
+            html = urlopen('http://'+decrypted_message)
+            content =  html.read().decode(html.headers.get_content_charset())
+            send(content)
+            return content
 
 
 @app.route("/enroute", methods={'POST'})
