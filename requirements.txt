@@ -4,3 +4,4 @@ pandas
 pycrypto==2.6.1
 gevent
 flask-socketio
+socketIO_client
