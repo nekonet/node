@@ -1,4 +1,4 @@
-var socket = require("socket.io-client")("http://localhost:5000");
+var socket = require("socket.io-client")("http://46.101.182.73:5000");
 var Crypto = require('cryptojs');
 Crypto = Crypto.Crypto;
 var IV = 'This is an IV456';
@@ -32,13 +32,13 @@ var shared_secret_3 = null;
 socket.on('connect', function() {
       console.log("Sharing and creating keys...");
       console.log("Sending this data ", {p: p, g: g, s1: shared_1, s2: shared_2, s3: shared_3, jump:1,
-         second_host: 'localhost', second_port: 6000,
-         third_host: 'localhost', third_port: 7000,
+         second_host: '46.101.238.96', second_port: 5000,
+         third_host: '46.101.246.46', third_port: 5000,
          authorization: '...'
        });
       socket.emit('create_conection', {p: p, g: g, s1: shared_1, s2: shared_2, s3: shared_3, jump:1,
-         second_host: 'localhost', second_port: 6000,
-         third_host: 'localhost', third_port: 7000,
+        second_host: '46.101.238.96', second_port: 5000,
+        third_host: '46.101.246.46', third_port: 5000,
          authorization: 'BN24ZEnP4Z0gqflvxE9MOu0h11zfyAuK/La6i6sjaxaW1L6K0PpLf7Xwu69taWvFOR/28UOygxN64Ld+cMRuiPadwMBSygtwTw0lye3H5lCm11/aQV+IJnNFc/m5yHZuGddgT5j3qyqSsZ7kzCZe2YRC/f2vJ4asUyEjelid/b8='
        });
       socket.on('response1', function (response1) {
@@ -58,21 +58,18 @@ socket.on('connect', function() {
 
 //seguramente se deberia usar una promesa o algo asi para esperar a las respuestas
 
-setTimeout(function() {
-  console.log("\n\nresponse 1.. ", response_node_1['shared_node']);
-}, 5000);
 
 //computing shared keys
 
 setTimeout(function() {
   shared_secret_1 = Math.pow(response_node_1['shared_node'], secret_1) % p;
-}, 5000);
+}, 10000);
 setTimeout(function() {
   shared_secret_2 = Math.pow(response_node_2['shared_node'], secret_2) % p;
-}, 5000);
+}, 10000);
 setTimeout(function() {
   shared_secret_3 = Math.pow(response_node_3['shared_node'], secret_3) % p;
-}, 5000);
+}, 10000);
 
 
 setTimeout(function() {
@@ -98,8 +95,8 @@ setTimeout(function() {
 
   console.log("Sending request...");
   socket.emit('decrypt_and_send', {
-    jump:1, second_host: 'localhost', second_port: 6000,
-    third_host: 'localhost', third_port: 7000,
+    jump:1, second_host: '46.101.238.96', second_port: 5000,
+    third_host: '46.101.246.46', third_port: 5000,
     uuid1 : response_node_1['uuid'],
     uuid2 : response_node_2['uuid'],
     uuid3 : response_node_3['uuid'],
@@ -109,9 +106,9 @@ setTimeout(function() {
   socket.on('content', function (content) {
     console.log('The response is ', content);
 
-}, 6000);
+}, 13000);
 
 setTimeout(function() {
 
-});}, 10000);
+});}, 15000);
 
